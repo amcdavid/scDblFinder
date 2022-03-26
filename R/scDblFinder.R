@@ -103,6 +103,7 @@
 #' @param BPPARAM Used for multithreading when splitting by samples (i.e. when
 #' `samples!=NULL`); otherwise passed to eventual PCA and K/SNN calculations.
 #' @param ... further arguments passed to \code{\link{getArtificialDoublets}}.
+#' @param multiSampleError Whether when to stop upon an error in multi sample mode, or keep going with a warning
 #'
 #' @return The \code{sce} object with several additional colData columns, in
 #' particular `scDblFinder.score` (the final score used) and `scDblFinder.class`
@@ -192,7 +193,9 @@ scDblFinder <- function(
   aggregateFeatures=FALSE,  returnType=c("sce","table","full","counts"),
   score=c("xgb","weighted","ratio"), processing="default", metric="logloss",
   nrounds=0.25, max_depth=4, iter=3, trainingFeatures=NULL,
+  multiSampleError = c('stop', 'warn'),
   multiSampleMode=c("split","singleModel","singleModelSplitThres","asOne"),
+
   threshold=TRUE, verbose=is.null(samples), BPPARAM=SerialParam(), ...){
 
   multiSampleMode <- match.arg(multiSampleMode)
@@ -207,6 +210,7 @@ scDblFinder <- function(
       " types, or a positive integer indicating the number of markers to use.")
   }
   returnType <- match.arg(returnType)
+  multiSampleError <- match.arg(multiSampleError)
   if(!is.null(clusters) && (!is.logical(clusters))){
     if(length(clusters)>1 || !is.numeric(clusters))
       clusters <- .checkColArg(sce, clusters)
@@ -251,6 +255,7 @@ scDblFinder <- function(
     cs <- split(seq_along(samples), samples, drop=TRUE)
     names(nn) <- nn <- names(cs)
     ## run scDblFinder individually
+
     d <- bplapply(nn, BPPARAM=BPPARAM, FUN=function(n){
       x <- cs[[n]]
       if(!is.null(clusters) && length(clusters)>1) clusters <- clusters[x]
@@ -271,7 +276,12 @@ scDblFinder <- function(
                     removeUnidentifiable=removeUnidentifiable, verbose=FALSE,
                     aggregateFeatures=aggregateFeatures, ...),
                error=function(e){
-                 stop("An error occured while processing sample '",n,"':\n", e)
+                 if(multiSampleError == 'stop'){
+                   stop("An error occured while processing sample '",n,"':\n", e)
+                 } else{
+                   warning("An error occured while processing sample '",n,"':\n", e)
+                   return(sce[sel_features,x])
+                 }
                })
     })
     if(returnType=="counts"){
